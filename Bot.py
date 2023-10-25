@@ -3,7 +3,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, filters, Callb
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import *
 import re
-TOKEN = 'BOT_TOKEN'
+TOKEN = '6755913486:AAG5wiU9-3PYp2g5fMue0njNOJspCyucqD8'
 
 def start(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
@@ -35,7 +35,7 @@ def analyze_text(update, context):
         update.message.reply_text("Извините, это не похоже на ссылку. Пожалуйста, отправьте ссылку на сайт.")
 
 def main():
-    updater = Updater("YOUR_BOT_TOKEN", use_context=True)
+    updater = Updater("6755913486:AAG5wiU9-3PYp2g5fMue0njNOJspCyucqD8", use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start))
