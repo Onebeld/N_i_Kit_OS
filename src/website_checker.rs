@@ -1,6 +1,6 @@
-use std::io::Error;
+use std::io::{Error};
 use checkssl::{Cert, CheckSSL};
-use http::Uri;
+use http::{StatusCode, Uri};
 
 pub struct Website {
     url: String
@@ -16,6 +16,20 @@ impl Website {
     pub fn get_ssl_certificate(&self) -> Result<Cert, Error> {
         let uri = self.url.parse::<Uri>().unwrap();
         CheckSSL::from_domain(uri.host().unwrap())
+    }
+
+    pub async fn get_request_code(&self) -> Option<StatusCode> {
+        let uri = self.url.parse::<Uri>().unwrap();
+        let res = reqwest::get(uri.to_string()).await;
+
+        return match res {
+            Ok(response) => {
+                Some(response.status())
+            }
+            Err(_) => {
+                None
+            }
+        }
     }
 }
 
@@ -49,7 +63,7 @@ mod website_checker_tests {
             Ok(cert) => {
                 println!("Organization name from rsvpu.ru: {}", cert.intermediate.organization);
             }
-            Err(e) => {
+            Err(_) => {
                 println!("Organization name from rsvpu.ru: no data");
             }
         }
