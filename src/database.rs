@@ -9,6 +9,11 @@ pub struct History {
     pub link: String,
 }
 
+pub struct StructuredHistory {
+    pub user_id: u64,
+    pub links: Vec<String>
+}
+
 impl Database {
     /// Adds a new story to the database
     ///
@@ -20,6 +25,7 @@ impl Database {
         // Adding a new row to the database
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
         let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
+
         let mut db = connection.prepare("INSERT INTO history VALUES (?, ?)").unwrap();
 
         // The numbers 1 and 2 denote the location of the question mark in the query
@@ -75,6 +81,60 @@ impl Database {
                 user_id: db.read::<f64>(0).unwrap(),
                 link: db.read::<String>(1).unwrap()
             })
+        }
+
+        return vec
+    }
+
+    pub fn get_all_users() -> Vec<u64> {
+        let query = "SELECT DISTINCT user_id FROM history";
+
+        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
+        let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
+
+        let mut db = connection.prepare(query).unwrap();
+
+        let mut vec: Vec<u64> = Vec::new();
+
+        while let State::Row = db.next().unwrap() {
+            let user_id = db.read::<f64>(0).unwrap() as u64;
+
+            vec.push(user_id)
+        }
+
+        vec
+    }
+
+    pub fn get_structured_all_histories() -> Vec<StructuredHistory> {
+        let query = "SELECT * FROM history";
+
+        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
+        let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
+
+        let mut db = connection.prepare(query).unwrap();
+
+        let mut vec: Vec<StructuredHistory> = Vec::new();
+
+        while let State::Row = db.next().unwrap() {
+            let user_id: u64 = db.read::<f64>(0).unwrap() as u64;
+            let link: String = db.read::<String>(1).unwrap();
+
+            let mut pushed = false;
+
+            for history in &mut vec {
+                if history.user_id == user_id {
+                    history.links.push(link.clone());
+                    pushed = true;
+                    break
+                }
+            }
+
+            if !pushed {
+                vec.push(StructuredHistory {
+                    user_id,
+                    links: vec![link]
+                })
+            }
         }
 
         return vec

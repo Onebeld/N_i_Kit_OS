@@ -1,6 +1,7 @@
 use std::io::{Error};
 use checkssl::{Cert, CheckSSL};
 use http::{StatusCode, Uri};
+use http::uri::InvalidUri;
 
 pub struct Website {
     url: String
@@ -30,6 +31,11 @@ impl Website {
                 None
             }
         }
+    }
+    
+    pub fn try_parse(link: String) -> Result<Uri, InvalidUri> {
+        let uri = link.parse::<Uri>();
+        uri
     }
 }
 

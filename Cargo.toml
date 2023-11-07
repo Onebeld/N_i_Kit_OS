@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 checkssl = "0.2.0"
 dptree = "0.3.0"
-futures = "0.3.29"
 http = "0.2.9"
 reqwest = "0.11.22"
 sqlite3 = "0.24.0"
