@@ -1,41 +1,37 @@
 use std::io::{Error};
 use checkssl::{Cert, CheckSSL};
-use http::{StatusCode, Uri};
-use http::uri::InvalidUri;
+use http::{Uri};
+use lazy_static::lazy_static;
+use regex::Regex;
 
-pub struct Website {
-    url: String
+const HTTP_S_REGEX: &str = "^(http|https)://";
+
+lazy_static! {
+    static ref RE_HTTP_S: Regex = {
+        Regex::new(HTTP_S_REGEX).unwrap()
+    };
 }
 
-impl Website {
-    pub fn new(url: &str) -> Website {
-        Website {
-            url: url.to_string()
-        }
-    }
+pub struct Website { }
 
-    pub fn get_ssl_certificate(&self) -> Result<Cert, Error> {
-        let uri = self.url.parse::<Uri>().unwrap();
+impl Website {
+    pub fn get_ssl_certificate(url: &str) -> Result<Cert, Error> {
+        let uri = url.parse::<Uri>().unwrap();
         CheckSSL::from_domain(uri.host().unwrap())
     }
 
-    pub async fn get_request_code(&self) -> Option<StatusCode> {
-        let uri = self.url.parse::<Uri>().unwrap();
-        let res = reqwest::get(uri.to_string()).await;
+    pub fn get_request_code(url: &str) -> Result<u16, reqwest::Error> {
+        let client = reqwest::blocking::Client::new();
 
-        return match res {
-            Ok(response) => {
-                Some(response.status())
-            }
-            Err(_) => {
-                None
-            }
-        }
+        let resp = client.get(url).send()?;
+
+        let status_code = resp.status().as_u16();
+
+        Ok(status_code)
     }
-    
-    pub fn try_parse(link: String) -> Result<Uri, InvalidUri> {
-        let uri = link.parse::<Uri>();
-        uri
+
+    pub fn has_http_s(url: &str) -> bool {
+        RE_HTTP_S.is_match(url)
     }
 }
 
@@ -51,19 +47,19 @@ mod website_checker_tests {
 
     #[test]
     fn test_get_certificate() {
-        let google_certificate = Website::new(GOOGLE).get_ssl_certificate();
+        let google_certificate = Website::get_ssl_certificate(GOOGLE);
         println!("Organization name from google.com: {}", google_certificate.unwrap().intermediate.organization);
 
-        let youtube_certificate = Website::new(YOUTUBE).get_ssl_certificate();
+        let youtube_certificate = Website::get_ssl_certificate(YOUTUBE);
         println!("Organization name from youtube.com: {}", youtube_certificate.unwrap().intermediate.organization);
 
-        let python_certificate = Website::new(PYTHON).get_ssl_certificate();
+        let python_certificate = Website::get_ssl_certificate(PYTHON);
         println!("Organization name from python.org: {}", python_certificate.unwrap().intermediate.organization);
 
-        let http_certificate = Website::new(HTTP).get_ssl_certificate();
+        let http_certificate = Website::get_ssl_certificate(HTTP);
         println!("Organization name from info.cern.ch: {}", http_certificate.unwrap().intermediate.organization);
 
-        let rsvpu_certificate = Website::new(RSVPU).get_ssl_certificate();
+        let rsvpu_certificate = Website::get_ssl_certificate(RSVPU);
 
         match rsvpu_certificate {
             Ok(cert) => {
@@ -73,6 +69,14 @@ mod website_checker_tests {
                 println!("Organization name from rsvpu.ru: no data");
             }
         }
+
+        assert!(true)
+    }
+
+    #[test]
+    fn test_get_request_code() {
+        let google_request = Website::get_request_code("https://latitude.google.com/").unwrap();
+        println!("Request code: {}", google_request);
 
         assert!(true)
     }

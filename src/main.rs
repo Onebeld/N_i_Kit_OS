@@ -1,39 +1,49 @@
 use std::time::Duration;
 use dptree::{case, deps};
+use is_url::is_url;
 use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
     prelude::*,
     Bot,
     utils::command::BotCommands,
-    dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler}
+    dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
+    types::{InputFile}
 };
-use crate::checker::Checker;
-use crate::database::Database;
 use crate::website_checker::Website;
 
 mod database;
 mod website_checker;
-mod checker;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 
-static mut CHECKERS: Vec<Checker> = Vec::new();
+#[derive(Clone)]
+pub struct UserWebsites {
+    pub user_id: u64,
+    pub links: Vec<String>
+}
 
-// 3600
-static SECONDS: u64 = 5;
+const SECONDS: u64 = 120;
+
+const STICKER_WELCOME: &str = "CAACAgIAAxkBAAEne6RlSyQM7sJfMXWBN3u-dfEgIlxzoAACBQADwDZPE_lqX5qCa011MwQ";
+const STICKER_ERROR: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwACEAADwDZPE-qBiinxHwLoMwQ";
+
+static mut CHECKERS: Vec<UserWebsites> = Vec::new();
 
 #[derive(BotCommands, Clone)]
-#[command(rename_rule = "lowercase", description = "These commands are supported:")]
+#[command(rename_rule = "lowercase", description = "Поддерживаются следующие команды:")]
 enum Command {
-    #[command(description = "start the procedure.")]
+    #[command(description = "запускает процедуру.")]
     Start,
-    #[command(description = "start the procedure without welcome message.")]
-    QuickStart,
-    #[command(description = "show bot's menu.")]
+    #[command(description = "показать меню бота.")]
     Menu,
+    #[command(description = "отменяет ввод ссылки.")]
+    Cancel,
 
-    #[command(description = "show commands.")]
+    #[command(description = "get in")]
+    GetInfo,
+
+    #[command(description = "показать комманды.")]
     Help
 }
 
@@ -41,8 +51,9 @@ enum Command {
 enum State {
     #[default]
     Default,
-
     ReceiveLink,
+    ReceiveConfirmRemoveHistories,
+    DeletingSomeHistory
 }
 
 #[tokio::main]
@@ -63,11 +74,18 @@ async fn main() -> HandlerResult {
     Ok(())
 }
 
+
+/// Creates a separate standalone thread in which it checks the availability of sites in the
+/// database every hour and if it is unavailable, informs the user
+///
+/// # Arguments
+///
+/// * `bot`: Bot instance
 unsafe fn launch_checkers(bot: Bot) {
-    let histories = Database::get_structured_all_histories();
+    let histories = database::get_structured_all_histories();
 
     for history in histories {
-        let checker: Checker = Checker::new(history.user_id, history.links);
+        let checker: UserWebsites = UserWebsites {user_id: history.user_id, links: history.links };
         CHECKERS.push(checker);
     }
 
@@ -79,12 +97,32 @@ unsafe fn launch_checkers(bot: Bot) {
 
             let checkers = CHECKERS.clone();
 
-            for mut checker in checkers {
-                if !checker.is_activated {
-                    continue;
-                }
+            for checker in checkers {
+                let user_id: UserId = UserId(checker.user_id);
 
-                checker.check_websites();
+                for link in checker.links {
+                    let text = format!("Произошла ошибка на стороне сервера по ссылке: {}", link);
+
+                    let _ = bot.send_message(user_id, text).await;
+                    let _ = bot.send_sticker(user_id, InputFile::file_id(STICKER_ERROR)).await;
+
+                    let status_code = Website::get_request_code(link.as_str());
+
+                    match status_code {
+                        Ok(status_code_unwrapped) => {
+                            match status_code_unwrapped {
+                                404 => {
+
+                                }
+                                200 => { continue }
+                                _ => {}
+                            }
+                        }
+                        Err(_) => {
+                            let _ = bot.send_message(user_id, format!("Не удалось проверить сайт по ссылке: {}", link)).await;
+                        }
+                    }
+                }
             }
         }
     });
@@ -94,14 +132,18 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
     let command_handler = teloxide::filter_command::<Command, _>()
         .branch(case![State::Default]
             .branch(case![Command::Start].endpoint(start))
-            .branch(case![Command::Menu].endpoint(show_menu_choice)));
+            .branch(case![Command::Menu].endpoint(show_menu_choice))
+            .branch(case![Command::Help].endpoint(help)))
+        .branch(case![State::ReceiveLink]
+            .branch(case![Command::Cancel].endpoint(cancel_receive_link)));
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
-        .branch(case![State::ReceiveLink].endpoint(recive_link));
+        .branch(case![State::ReceiveLink].endpoint(receive_link));
 
     let callback_query_handler = Update::filter_callback_query()
-        .branch(case![State::Default].endpoint(menu_choice_callback_handler));
+        .branch(case![State::Default].endpoint(menu_choice_callback_handler))
+        .branch(case![State::ReceiveConfirmRemoveHistories].endpoint(menu_confirm_remove_histories_callback_handler));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
@@ -109,16 +151,22 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 }
 
 // Command functions
-async fn start(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn start(bot: Bot, msg: Message) -> HandlerResult {
     let text = format!("Привет, {}! Я - {}, и я могу проанализировать Ваш сайт, то есть проверить скорость его загрузки и ежечасно приводить отчёт о сбоях в работе указанного Вами сайта.", msg.from().unwrap().first_name, bot.get_me().await?.first_name);
     let keyboard = create_beginning_menu_keyboard().await;
 
+    bot.send_sticker(msg.chat.id, InputFile::file_id(STICKER_WELCOME)).await?;
     bot.send_message(msg.chat.id, text).reply_markup(keyboard).await?;
 
     Ok(())
 }
 
-async fn show_menu_choice(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn help(bot: Bot, msg: Message) -> HandlerResult {
+    bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+    Ok(())
+}
+
+async fn show_menu_choice(bot: Bot, msg: Message) -> HandlerResult {
     show_actions(bot, msg).await?;
 
     Ok(())
@@ -130,10 +178,27 @@ async fn menu_choice_callback_handler(bot: Bot, dialogue: MyDialogue, q: Callbac
             match data.as_str() {
                 "begin" => show_actions(bot, message).await?,
                 "get_history" => get_histories(bot, message, q.from.id).await?,
-                "clear_history" => clear_histories(bot, message, q.from.id).await?,
-                "confirm_clear_history" => ask_about_clear_histories(bot, message).await?,
+                "clear_history" => ask_about_clear_histories(bot, dialogue, message).await?,
 
                 "enter_link" => start_enter_link(bot, dialogue, message).await?,
+
+                _ => (),
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn menu_confirm_remove_histories_callback_handler(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+    if let Some(data) = q.data {
+        if let Some(message) = q.message {
+            match data.as_str() {
+                "confirm" => clear_histories(bot, dialogue, message, q.from.id).await?,
+                "cancel" => {
+                    bot.send_message(message.chat.id, "Процесс очистки истории запросов отменен.").await?;
+                    dialogue.update(State::Default).await?;
+                },
 
                 _ => (),
             }
@@ -152,11 +217,13 @@ async fn show_actions(bot: Bot, msg: Message) -> HandlerResult {
     Ok(())
 }
 
-async fn ask_about_clear_histories(bot: Bot, msg: Message) -> HandlerResult {
-    let text = "Вы действительно хотите очистить истоирю запросов? Нажмите на кнопку ниже, если вы подтверждаете своё действие.";
+async fn ask_about_clear_histories(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    let text = "Вы действительно хотите очистить историю запросов?";
     let keyboard = create_confirmation_menu_keyboard().await;
 
     bot.send_message(msg.chat.id, text).reply_markup(keyboard).await?;
+
+    dialogue.update(State::ReceiveConfirmRemoveHistories).await?;
 
     Ok(())
 }
@@ -169,32 +236,53 @@ async fn start_enter_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> Handl
     Ok(())
 }
 
-async fn recive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    let mut url: String;
+
     match msg.text() {
         Some(text) => {
-            let res = Website::try_parse(text.to_string());
-
-            match res {
-                Ok(link) => {
-                    bot.send_message(msg.chat.id, "Спасибо за ссылку!").await?;
-
-                    Database::add_history(msg.from().unwrap().id.0 as f64, link.to_string().as_str());
-
-                    unsafe {
-                        add_history_to_checkers(msg.from().unwrap().id.0, link.to_string());
-                    }
-
-                    dialogue.update(State::Default).await?;
-                }
-                Err(_) => {
-                    bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
-                }
-            }
+            url = text.to_string();
         }
         None => {
             bot.send_message(msg.chat.id, "Пожалуйста, введите ссылку.").await?;
+            return Ok(());
         }
     }
+
+    if !Website::has_http_s(url.as_str()) {
+        url = format!("https://{}", url);
+    }
+
+    if is_url(url.as_str()) {
+        if database::is_history_exists(msg.from().unwrap().id.0 as f64, url.as_str()) {
+            bot.send_message(msg.chat.id, "Данная ссылка уже была добавлена").await?;
+
+            dialogue.update(State::Default).await?;
+
+            return Ok(());
+        }
+
+        database::add_history(msg.from().unwrap().id.0 as f64, url.as_str());
+
+        unsafe {
+            add_history_to_checkers(msg.from().unwrap().id.0, url);
+        }
+
+        bot.send_message(msg.chat.id, "Спасибо за ссылку!").await?;
+
+        dialogue.update(State::Default).await?;
+    }
+    else {
+        bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
+    }
+
+    Ok(())
+}
+
+async fn cancel_receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    bot.send_message(msg.chat.id, "Вы отменили ввод ссылки").await?;
+
+    dialogue.update(State::Default).await?;
 
     Ok(())
 }
@@ -227,9 +315,11 @@ async fn create_main_menu_keyboard() -> InlineKeyboardMarkup {
 async fn create_confirmation_menu_keyboard() -> InlineKeyboardMarkup {
     let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
 
-    let confirmation = InlineKeyboardButton::callback("Очистить", "confirm_clear_history");
+    let confirmation = InlineKeyboardButton::callback("Очистить", "confirm");
+    let cancel = InlineKeyboardButton::callback("Отмена", "cancel");
 
     keyboard.push(vec![confirmation]);
+    keyboard.push(vec![cancel]);
 
     InlineKeyboardMarkup::new(keyboard)
 }
@@ -244,17 +334,29 @@ unsafe fn add_history_to_checkers(user_id: u64, link: String) {
             CHECKERS[index].links.push(link);
         }
         None => {
-            CHECKERS.push(Checker {
+            CHECKERS.push(UserWebsites {
                 user_id,
-                is_activated: true,
                 links: vec![link]
             });
         }
     }
 }
 
+unsafe fn remove_histories_from_checkers(user_id: u64) {
+    let index_result = CHECKERS.iter().position(|r| r.user_id == user_id);
+
+    match index_result {
+        Some(index) => {
+            CHECKERS.remove(index)
+        }
+        None => {
+            return;
+        }
+    };
+}
+
 async fn get_histories(bot: Bot, msg: Message, user_id: UserId) -> HandlerResult {
-    let histories = Database::get_histories(user_id.0 as f64, None);
+    let histories = database::get_histories(user_id.0 as f64, None);
 
     if histories.iter().count() == 0 {
         bot.send_message(msg.chat.id, "У вас нет истории запросов").await?;
@@ -273,10 +375,16 @@ async fn get_histories(bot: Bot, msg: Message, user_id: UserId) -> HandlerResult
     Ok(())
 }
 
-async fn clear_histories(bot: Bot, msg: Message, user_id: UserId) -> HandlerResult {
-    Database::clear_histories(user_id.0 as f64);
+async fn clear_histories(bot: Bot, dialogue: MyDialogue, msg: Message, user_id: UserId) -> HandlerResult {
+    database::clear_histories(user_id.0 as f64);
+
+    unsafe {
+        remove_histories_from_checkers(user_id.0);
+    }
 
     bot.send_message(msg.chat.id, "Ваша история запросов успешно очищена!").await?;
+
+    dialogue.update(State::Default).await?;
 
     Ok(())
 }
