@@ -17,7 +17,7 @@ pub struct StructuredHistory {
 ///
 /// * 'user_id' - Telegram user ID
 /// * 'link' - Link to the site
-pub fn add_history(user_id: f64, link: &str) -> State {
+pub fn add_history(user_id: u64, link: &str) -> State {
     // Adding a new row to the database
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
     let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
@@ -38,7 +38,7 @@ pub fn add_history(user_id: f64, link: &str) -> State {
 ///
 /// * 'user_id' - Telegram user ID
 /// * 'link' - Link to the site
-pub fn is_history_exists(user_id: f64, link: &str) -> bool {
+pub fn is_history_exists(user_id: u64, link: &str) -> bool {
     // We get the history list and check if there are any items in it
     let vec: Vec<History> = get_histories(user_id, Option::from(link));
     return vec.iter().count() > 0
@@ -50,7 +50,7 @@ pub fn is_history_exists(user_id: f64, link: &str) -> bool {
 ///
 /// * 'user_id' - Telegram user ID
 /// * 'link' - Link to the site if you need to prevent duplicate links
-pub fn get_histories(user_id: f64, link: Option<&str>) -> Vec<History> {
+pub fn get_histories(user_id: u64, link: Option<&str>) -> Vec<History> {
     let query: &str;
 
     // Depending on whether the reference is None, type in your query
@@ -140,43 +140,52 @@ pub fn get_structured_all_histories() -> Vec<StructuredHistory> {
 /// # Arguments
 ///
 /// * 'user_id' - Telegram user ID
-pub fn clear_histories(user_id: f64) -> State {
+pub fn clear_histories(user_id: u64) -> State {
     // Specify in the request that we want to delete all histories in which the user ID matches the required one
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
     let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
     let mut db = connection.prepare("DELETE FROM history WHERE user_id = ?").unwrap();
 
     db.bind(1, user_id.to_string().as_str()).unwrap();
-
-
+    
     // Also, don't forget to save the changes
     db.next().unwrap()
 }
 
+pub fn delete_some_histories(user_id: u64, links: Vec<&str>) {
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
+    let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
+
+    for link in links {
+        let mut db = connection.prepare("DELETE FROM history WHERE user_id = ? AND link = ?").unwrap();
+
+        db.bind(1, user_id.to_string().as_str()).unwrap();
+        db.bind(2, link).unwrap();
+
+        db.next().unwrap();
+    }
+}
+
 #[cfg(test)]
 mod database_test {
-    use crate::database;
     use super::*;
-
-    // This is where you indicate your path
-    static PATH: &str = "C:\\Users\\Dmitry\\RustroverProjects\\N_i_Kit_OS\\databases\\main_database.sqlite";
 
     #[test]
     fn test_insert_into_database() {
-        add_history(654352f64, "Hello world!");
-        add_history(654352f64, "No");
-        add_history(654352f64, "Yes");
-        add_history(654352f64, "Ggg");
-        add_history(3552f64, "Lol");
-        add_history(3552f64, "Go");
+        add_history(654352, "Hello world!");
+        add_history(654352, "No");
+        add_history(654352, "Yes");
+        add_history(654352, "Ggg");
+        add_history(3552, "Lol");
+        add_history(3552, "Go");
 
         assert!(true)
     }
 
     #[test]
     fn test_is_history_exists() {
-        let bool1 = is_history_exists(654352f64, "Ggg");
-        let bool2 = is_history_exists(654352f64, "Gg");
+        let bool1 = is_history_exists(654352, "Ggg");
+        let bool2 = is_history_exists(654352, "Gg");
 
         println!("Is exist: {}", bool1);
         println!("Is exist: {}", bool2);
@@ -186,7 +195,7 @@ mod database_test {
 
     #[test]
     fn test_get_histories() {
-        let vec = get_histories(654352f64, None);
+        let vec = get_histories(654352, None);
 
         for history in vec {
             println!("User ID: {} | Link: {}", history.user_id, history.link);
@@ -197,8 +206,8 @@ mod database_test {
 
     #[test]
     fn test_clear_history() {
-        clear_histories(654352f64);
-        clear_histories(3552f64);
+        clear_histories(654352);
+        clear_histories(3552);
 
         println!("Histories for {} is cleared!", 654352f64);
         println!("Histories for {} is cleared!", 3552f64);
