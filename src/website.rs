@@ -1,4 +1,3 @@
-use std::io::{Error};
 use checkssl::{Cert, CheckSSL};
 use http::{Uri};
 use lazy_static::lazy_static;
@@ -6,24 +5,47 @@ use regex::Regex;
 
 const HTTP_S_REGEX: &str = "^(http|https)://";
 
+pub struct SiteInformation {
+    pub status_code: u16,
+    pub has_robots: u16,
+    pub has_sitemap: u16,
+    pub duration: u128,
+    pub certificate: Option<Cert>
+}
+
 lazy_static! {
     static ref RE_HTTP_S: Regex = {
         Regex::new(HTTP_S_REGEX).unwrap()
     };
 }
 
-pub fn get_ssl_certificate(url: &str) -> Result<Cert, Error> {
-    let uri = url.parse::<Uri>().unwrap();
-    CheckSSL::from_domain(uri.host().unwrap())
-}
-
 pub async fn get_request_code(url: &str) -> Result<u16, reqwest::Error> {
-    let client = reqwest::Client::new();
-    let resp = client.get(url).send().await?;
-
+    let resp = reqwest::get(url).await?;
     let status_code = resp.status().as_u16();
 
     Ok(status_code)
+}
+
+pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest::Error> {
+    let client = reqwest::Client::new();
+
+    let time_now = std::time::Instant::now();
+    let resp_site = reqwest::get(url).await?;
+    let elapsed_time = time_now.elapsed();
+
+    let uri = url.parse::<Uri>().unwrap();
+    let cert = CheckSSL::from_domain(uri.host().unwrap());
+
+    let resp_robots = client.get(format!("{}://{}/robots.txt", uri.scheme_str().unwrap(), uri.host().unwrap())).send().await?;
+    let resp_sitemap = client.get(format!("{}://{}/sitemap.xml", uri.scheme_str().unwrap(), uri.host().unwrap())).send().await?;
+
+    Ok(SiteInformation {
+        status_code: resp_site.status().as_u16(),
+        duration: elapsed_time.as_millis(),
+        certificate: cert.ok(),
+        has_robots: resp_robots.status().as_u16(),
+        has_sitemap: resp_sitemap.status().as_u16()
+    })
 }
 
 pub fn has_http_s(url: &str) -> bool {
@@ -41,32 +63,35 @@ mod website_checker_tests {
     static RSVPU: &str = "https://rsvpu.ru/programs/bakalavriat";
     static HTTP: &str = "http://info.cern.ch/";
 
-    #[test]
-    fn test_get_certificate() {
-        let google_certificate = website::get_ssl_certificate(GOOGLE);
-        println!("Organization name from google.com: {}", google_certificate.unwrap().intermediate.organization);
+    #[tokio::test]
+    async fn test_get_certificate() {
+        let google_information = website::get_site_information(GOOGLE).await;
 
-        let youtube_certificate = website::get_ssl_certificate(YOUTUBE);
-        println!("Organization name from youtube.com: {}", youtube_certificate.unwrap().intermediate.organization);
+        match google_information {
+            Ok(info) => {
+                println!("Status code: {}", info.status_code);
 
-        let python_certificate = website::get_ssl_certificate(PYTHON);
-        println!("Organization name from python.org: {}", python_certificate.unwrap().intermediate.organization);
+                match info.certificate {
+                    Some(cert) => {
+                        println!("Organization name: {}", cert.intermediate.organization)
+                    }
+                    None => {
+                        println!("Organization name: none")
+                    }
+                }
 
-        let http_certificate = website::get_ssl_certificate(HTTP);
-        println!("Organization name from info.cern.ch: {}", http_certificate.unwrap().intermediate.organization);
+                println!("Duration: {}", info.duration);
+                println!("Has robots.txt: {}", info.has_robots);
+                println!("Has sitemap.xml: {}", info.has_sitemap);
 
-        let rsvpu_certificate = website::get_ssl_certificate(RSVPU);
-
-        match rsvpu_certificate {
-            Ok(cert) => {
-                println!("Organization name from rsvpu.ru: {}", cert.intermediate.organization);
+                assert!(true)
             }
-            Err(_) => {
-                println!("Organization name from rsvpu.ru: no data");
+            Err(e) => {
+                println!("Failed to verify the site: {}", e);
+
+                assert!(false)
             }
         }
-
-        assert!(true)
     }
 
     #[tokio::test]
