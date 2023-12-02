@@ -10,6 +10,7 @@ use teloxide::{
     dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
     types::{InputFile}
 };
+use teloxide::dispatching::dialogue::GetChatId;
 use crate::database::Links;
 
 extern crate pretty_env_logger;
@@ -29,14 +30,14 @@ const STICKER_ERROR: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwACEAA
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Поддерживаются следующие команды:")]
 enum Command {
-    #[command(description = "запускает процедуру.")]
+    #[command(description = "Запускает процедуру.")]
     Start,
-    #[command(description = "показать меню действий бота.")]
+    #[command(description = "Показать меню действий бота.")]
     Menu,
-    #[command(description = "отменяет ввод данных в бот.")]
+    #[command(description = "Отменяет ввод данных в бот.")]
     Cancel,
 
-    #[command(description = "показать команды.")]
+    #[command(description = "Показать команды.")]
     Help
 }
 
@@ -219,10 +220,10 @@ async fn menu_choice_callback_handler(bot: Bot, dialogue: MyDialogue, q: Callbac
                 "begin" => show_actions(bot, message).await?,
                 "check_link" => start_check_link(bot, dialogue, message).await?,
                 "get_links" => get_all_links_from_user(bot, q).await?,
-                "clear_all_links" => ask_about_clear_links(bot, dialogue, message).await?,
+                "clear_all_links" => ask_about_clear_links(bot, dialogue, q).await?,
                 "delete_some_links" => start_deleting_some_links(bot, dialogue, q).await?,
 
-                "enter_link" => start_enter_link(bot, dialogue, message).await?,
+                "enter_links" => start_enter_links(bot, dialogue, message).await?,
 
                 _ => (),
             }
@@ -246,7 +247,7 @@ async fn menu_confirm_remove_links_callback_handler(bot: Bot, dialogue: MyDialog
             match data.as_str() {
                 "confirm" => clear_links(bot, dialogue, q).await?,
                 "cancel" => {
-                    bot.send_message(message.chat.id, "Процесс очистки истории запросов отменен.").await?;
+                    bot.edit_message_text(message.chat.id, q.message.unwrap().id, "Процесс очистки ссылок отменен.").await?;
                     dialogue.update(State::Default).await?;
                 },
 
@@ -280,11 +281,19 @@ async fn show_actions(bot: Bot, msg: Message) -> HandlerResult {
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `msg`: Message sent by the user
-async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+    let user_id = q.from.id;
+    let histories = database::get_all_links_from_user(user_id.0, None);
+
+    if histories.iter().count() == 0 {
+        bot.send_message(user_id, "У вас нет ссылок для удаления").await?;
+        return Ok(());
+    }
+
     let text = "❓ Вы действительно хотите очистить все сохраненные вами ссылки? ❓";
     let keyboard = create_confirmation_menu_keyboard().await;
 
-    bot.send_message(msg.chat.id, text).reply_markup(keyboard).await?;
+    bot.send_message(q.chat_id().unwrap(), text).reply_markup(keyboard).await?;
 
     dialogue.update(State::ReceiveConfirmRemoveLinks).await?;
 
@@ -299,7 +308,7 @@ async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> 
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `msg`: Message sent by the user
-async fn start_enter_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn start_enter_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Пожалуйста, введите ссылку. Для отмены ввода ссылки введите команду /cancel").await?;
     dialogue.update(State::ReceiveLink).await?;
 
@@ -321,6 +330,31 @@ async fn start_check_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> Handl
     Ok(())
 }
 
+/// Receives a link from a user, validates it, and adds it to the database if it is a valid URL.
+///
+/// # Arguments
+///
+/// * `bot` - A `Bot` object representing the Telegram bot.
+/// * `dialogue` - A `MyDialogue` object for handling the conversation flow.
+/// * `msg` - A `Message` object representing the received message.
+///
+/// # Returns
+///
+/// A `HandlerResult`, indicating the success or failure of the operation.
+///
+/// # Examples
+///
+/// ```
+/// # use my_bot::{Bot, MyDialogue, Message, HandlerResult};
+/// # use my_bot::website;
+/// # use my_bot::database;
+/// # use log::info;
+/// # use std::error::Error;
+/// async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+///     // Code implementation
+///     Ok(())
+/// }
+/// ```
 async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     let user_id = msg.from().expect("Unable to determine user ID").id;
 
@@ -342,9 +376,7 @@ async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRe
 
     if is_url(&url) {
         if database::is_link_exists(user_id.0, &url) {
-            bot.send_message(msg.chat.id, "Данная ссылка уже была добавлена").await?;
-
-            dialogue.update(State::Default).await?;
+            bot.send_message(msg.chat.id, "Данная ссылка уже была добавлена. Пожалуйста, введите другую").await?;
 
             return Ok(());
         }
@@ -479,13 +511,13 @@ async fn create_main_menu_keyboard() -> InlineKeyboardMarkup {
     let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
 
     let check_link = InlineKeyboardButton::callback("🔭 Проанализировать сайт 🔭", "check_link");
-    let enter_link = InlineKeyboardButton::callback("✏️ Ввести ссылку на сайт ✏️", "enter_link");
+    let enter_links = InlineKeyboardButton::callback("✏️ Добавить ссылки ✏️", "enter_links");
     let links = InlineKeyboardButton::callback("📒 Получить все ссылки 📒", "get_links");
     let delete_some_histories = InlineKeyboardButton::callback("✂️ Удалить несколько ссылок ✂️", "delete_some_links");
     let clear_all_links = InlineKeyboardButton::callback("❌ Очистить все ссылки ❌", "clear_all_links");
 
     keyboard.push(vec![check_link]);
-    keyboard.push(vec![enter_link]);
+    keyboard.push(vec![enter_links]);
     keyboard.push(vec![links]);
     keyboard.push(vec![delete_some_histories]);
     keyboard.push(vec![clear_all_links]);
@@ -542,7 +574,7 @@ async fn start_deleting_some_links(bot: Bot, dialogue: MyDialogue, q: CallbackQu
     let histories = database::get_all_links_from_user(user_id.0, None);
 
     if histories.iter().count() == 0 {
-        bot.send_message(user_id, "У вас нет истории запросов для удаления").await?;
+        bot.send_message(user_id, "У вас нет ссылок для удаления").await?;
     }
     else {
         let str = create_links_list("Выберите, какие элементы требуется удалить. Напишите номера элемента через пробел. Вы можете отменить удаление, введя команду /cancel.\n\nИстория запросов:\n", histories);
@@ -597,11 +629,16 @@ async fn delete_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
     let mut numbers: Vec<usize> = Vec::new();
 
     for number_string in numbers_string.split(" ") {
-        let res = number_string.parse::<usize>();
+        let res = number_string.parse::<i32>();
 
         match res {
             Ok(number) => {
-                numbers.push(number - 1);
+                if number - 1 < 0 {
+                    bot.send_message(msg.chat.id, "Введенный текст не является корректным!").await?;
+                    return Ok(());
+                }
+
+                numbers.push((number - 1) as usize);
             }
             Err(_) => {
                 bot.send_message(msg.chat.id, "Введенный текст не является корректным!").await?;
@@ -611,19 +648,20 @@ async fn delete_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
     }
 
     let histories = database::get_all_links_from_user(user_id, None);
-    let numbers_len = numbers.len();
     let mut links: Vec<&str> = Vec::new();
 
     for number in numbers {
-        if number > numbers_len - 1 {
+        if let Some(link) = histories.get(number) {
+            links.push(&link.link);
+        }
+        else {
             bot.send_message(msg.chat.id, "Некоторые элементы не существуют в списке!").await?;
+
             return Ok(());
         }
-
-        links.push(histories[number].link.as_str());
     }
 
-    database::delete_some_histories(user_id, links);
+    database::delete_some_links(user_id, links);
 
     bot.send_message(msg.chat.id, "Выбранные вами элементы были удалены").await?;
     dialogue.update(State::Default).await?;

@@ -19,6 +19,29 @@ lazy_static! {
     };
 }
 
+/// Sends a GET request to the specified URL and returns the status code.
+///
+/// # Arguments
+///
+/// * `url` - A string slice that holds the URL of the API endpoint.
+///
+/// # Returns
+///
+/// * An `Ok` variant containing the status code as a `u16` if the request is successful.
+/// * An `Err` variant containing a `reqwest::Error` if an error occurs during the request.
+///
+/// # Examples
+///
+/// ```rust
+/// use reqwest::Error;
+///
+/// async fn example() -> Result<u16, Error> {
+///     let url = "https://example.com";
+///     let status_code = get_request_code(url).await?;
+///     println!("Status code: {}", status_code);
+///     Ok(status_code)
+/// }
+/// ```
 pub async fn get_request_code(url: &str) -> Result<u16, reqwest::Error> {
     let resp = reqwest::get(url).await?;
     let status_code = resp.status().as_u16();
@@ -26,6 +49,23 @@ pub async fn get_request_code(url: &str) -> Result<u16, reqwest::Error> {
     Ok(status_code)
 }
 
+/// Fetches site information for a given URL.
+///
+/// The function makes use of the `reqwest` crate to perform HTTP requests.
+/// It retrieves the following information about the site:
+/// - Status code of the main page response
+/// - Duration of the request in milliseconds
+/// - Existence of SSL certificate for the domain
+/// - Status code of the response for the robots.txt file
+/// - Status code of the response for the sitemap.xml file
+///
+/// # Arguments
+///
+/// * `url` - A string slice representing the URL of the site to fetch information for.
+///
+/// # Returns
+///
+/// A `Result` containing a `SiteInformation` struct on success, or a `reqwest::Error` on failure.
 pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest::Error> {
     let client = reqwest::Client::new();
 
@@ -48,6 +88,25 @@ pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest:
     })
 }
 
+/// Checks if a given URL has a scheme of "http://" or "https://".
+///
+/// # Arguments
+///
+/// * `url` - A string slice representing the URL to be checked.
+///
+/// # Returns
+///
+/// Returns `true` if the URL has a scheme of "http://" or "https://", and `false` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(has_http_s("http://example.com"), true);
+/// assert_eq!(has_http_s("https://example.com"), true);
+/// assert_eq!(has_http_s("ftp://example.com"), false);
+/// assert_eq!(has_http_s("example.com"), false);
+/// assert_eq!(has_http_s("http://"), false);
+/// ```
 pub fn has_http_s(url: &str) -> bool {
     RE_HTTP_S.is_match(url)
 }

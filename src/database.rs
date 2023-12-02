@@ -49,7 +49,12 @@ pub fn get_all_links_from_user(user_id: u64, link: Option<&str>) -> Vec<Links> {
     let query: &str;
 
     // Depending on whether the reference is None, type in your query
-    if let Some(_) = link { query = "SELECT * FROM links WHERE user_id = ? AND link = ?" } else { query = "SELECT * FROM links WHERE user_id = ?" }
+    if link.is_some() {
+        query = "SELECT * FROM links WHERE user_id = ? AND link = ?";
+    }
+    else {
+        query = "SELECT * FROM links WHERE user_id = ?";
+    }
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
     let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
@@ -76,6 +81,16 @@ pub fn get_all_links_from_user(user_id: u64, link: Option<&str>) -> Vec<Links> {
     vec
 }
 
+/// Get all links from the database.
+///
+/// # Returns
+///
+/// A vector containing all the links found in the database.
+///
+/// # Panics
+///
+/// This function will panic if the `DATABASE_URL` environment variable is not set
+/// or if there is a problem connecting to the database.
 pub fn get_all_links() -> Vec<Links> {
     let query = "SELECT * FROM links";
 
@@ -113,7 +128,27 @@ pub fn clear_all_links(user_id: u64) -> State {
     db.next().unwrap()
 }
 
-pub fn delete_some_histories(user_id: u64, links: Vec<&str>) {
+/// Deletes some links from the database for a given user ID.
+///
+/// # Arguments
+///
+/// * `user_id` - The ID of the user.
+/// * `links` - A vector of links to be deleted.
+///
+/// # Panics
+///
+/// This function panics if the `DATABASE_URL` environment variable is not set or if there is a failure
+/// to connect to the database.
+///
+/// # Examples
+///
+/// ```rust
+/// let user_id = 123;
+/// let links = vec!["http://example.com", "http://example.org"];
+///
+/// delete_some_links(user_id, links);
+/// ```
+pub fn delete_some_links(user_id: u64, links: Vec<&str>) {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
     let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
 
