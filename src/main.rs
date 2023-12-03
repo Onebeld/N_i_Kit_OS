@@ -12,6 +12,7 @@ use teloxide::{
 };
 use teloxide::dispatching::dialogue::GetChatId;
 use crate::database::Links;
+use crate::website::SiteInformation;
 
 extern crate pretty_env_logger;
 #[macro_use] extern crate log;
@@ -36,6 +37,14 @@ enum Command {
     Menu,
     #[command(description = "Отменяет ввод данных в бот.")]
     Cancel,
+    #[command(description = "Добавление ссылки в базу данных для ежечастной проверки сайта на доступность.")]
+    AddLink {
+        link: String
+    },
+    #[command(description = "Проанализировать сайт.")]
+    CheckSite {
+        link: String
+    },
 
     #[command(description = "Показать команды.")]
     Help
@@ -181,7 +190,9 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(case![BotState::Default]
             .branch(case![Command::Start].endpoint(start))
             .branch(case![Command::Menu].endpoint(show_actions))
-            .branch(case![Command::Help].endpoint(help)))
+            .branch(case![Command::Help].endpoint(help))
+            .branch(case![Command::AddLink { link }].endpoint(add_link))
+            .branch(case![Command::CheckSite { link }].endpoint(check_site_command)))
         .branch(case![BotState::ReceiveLink]
             .branch(case![Command::Cancel].endpoint(cancel_receive_link)))
         .branch(case![BotState::DeletingSomeLinks]
@@ -234,6 +245,96 @@ async fn start(bot: Bot, msg: Message) -> HandlerResult {
 /// * `msg`: Message sent by the user
 async fn help(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+    Ok(())
+}
+
+/// Adds a link to the database if it is a valid URL.
+///
+/// Arguments:
+/// - `bot`: The Telegram bot instance.
+/// - `msg`: The received message.
+/// - `link`: The link to be added.
+///
+/// Returns:
+/// The result of the operation.
+async fn add_link(bot: Bot, msg: Message, link: String) -> HandlerResult {
+    let user_id = msg.from().expect("Unable to determine user ID").id;
+    let mut url = link;
+
+    if !website::has_http_or_https(&url) {
+        url = format!("https://{}", url);
+    }
+
+    if is_url(&url) {
+        if database::is_link_exists(user_id.0, &url) {
+            bot.send_message(msg.chat.id, "Данная ссылка уже была добавлена. Пожалуйста, введите другую").await?;
+
+            return Ok(());
+        }
+
+        database::add_link(user_id.0, &url);
+
+        info!("Added a new link to the database from the user: {}", user_id);
+
+        bot.send_message(msg.chat.id, "Спасибо за ссылку! Теперь я буду проверять эту ссылку каждый час").await?;
+    }
+    else {
+        bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
+    }
+
+    Ok(())
+}
+
+/// Asynchronously checks the given site link and sends site information to the user.
+///
+/// # Arguments
+///
+/// * `bot` - The bot instance used to send messages.
+/// * `msg` - The message object representing the user message.
+/// * `link` - The site link to check.
+///
+/// # Returns
+///
+/// Returns a `HandlerResult` indicating the success or failure of the operation.
+///
+/// # Examples
+///
+/// ```
+/// use mybot::Bot;
+/// use mybot::Message;
+/// use mybot::HandlerResult;
+///
+/// #[tokio::main]
+/// async fn main() {
+///     let bot = Bot::new();
+///     let msg = Message::new();
+///     let link = "https://example.com".to_string();
+///     let result = check_site(bot, msg, link).await;
+///     assert!(result.is_ok());
+/// }
+/// ```
+async fn check_site_command(bot: Bot, msg: Message, link: String) -> HandlerResult {
+    let mut url = link;
+
+    if !website::has_http_or_https(&url) {
+        url = format!("https://{}", url);
+    }
+
+    if is_url(&url) {
+        let sent_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...").await?;
+
+        info!("Site information for the user is requested: {}", msg.from().expect("Unable to determine user ID").id.0);
+
+        let site_information = website::get_site_information(&url).await?;
+
+        let text = compile_site_information(site_information);
+
+        bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
+    }
+    else {
+        bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
+    }
+
     Ok(())
 }
 
@@ -459,45 +560,7 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
 
         let site_information = website::get_site_information(&url).await?;
 
-        let mut text = format!("❔ Информация о введеном вами сайте ❔\n\n");
-
-        text = format!("{text}📝 Код ответа: {}\n", site_information.status_code);
-        text = format!("{text}🕔 Время ответа: {} милисекунд\n", site_information.duration);
-
-        match site_information.has_robots {
-            200 => {
-                text = format!("{text}🤖 Наличие robots.txt: есть\n")
-            }
-            _ => {
-                text = format!("{text}🤖 Наличие robots.txt: нет (код ответа: {})\n", site_information.has_robots);
-            }
-        }
-        match site_information.has_sitemap {
-            200 => {
-                text = format!("{text}🗺 Наличие sitemap.xml: есть\n\n")
-            }
-            _ => {
-                text = format!("{text}🗺 Наличие sitemap.xml: нет (код ответа: {})\n\n", site_information.has_sitemap);
-            }
-        }
-
-        match site_information.certificate {
-            Some(cert) => {
-                text = format!("{text}📄 Сертификат:\
-                \nОбщее название: {}\
-                \nОрганизация: {}\
-                \nСтрана: {}\
-                \nИздатель: {}\
-                \nВремя окончания: {}\n\n", cert.intermediate.common_name,
-                               cert.intermediate.organization,
-                               cert.intermediate.country,
-                               cert.intermediate.issuer,
-                               cert.intermediate.time_to_expiration);
-            }
-            None => {
-                text = format!("{text}📄 Сертификат: не найден\n\n")
-            }
-        }
+        let text = compile_site_information(site_information);
 
         bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
 
@@ -508,6 +571,75 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
     }
 
     Ok(())
+}
+
+/// Compiles the site information into a formatted string.
+///
+/// # Arguments
+///
+/// * `site_information` - The site information to compile.
+///
+/// # Returns
+///
+/// A string containing the compiled site information.
+///
+/// # Examples
+///
+/// ```
+/// use crate::SiteInformation;
+///
+/// let info = SiteInformation {
+///     status_code: 200,
+///     duration: 100,
+///     has_robots: 200,
+///     has_sitemap: 200,
+///     certificate: None,
+/// };
+///
+/// let result = compile_site_information(info);
+/// ```
+fn compile_site_information(site_information: SiteInformation) -> String {
+    let mut text = format!("❔ Информация о введеном вами сайте ❔\n\n");
+
+    text = format!("{text}📝 Код ответа: {}\n", site_information.status_code);
+    text = format!("{text}🕔 Время ответа: {} милисекунд\n", site_information.duration);
+
+    match site_information.has_robots {
+        200 => {
+            text = format!("{text}🤖 Наличие robots.txt: есть\n")
+        }
+        _ => {
+            text = format!("{text}🤖 Наличие robots.txt: нет (код ответа: {})\n", site_information.has_robots);
+        }
+    }
+    match site_information.has_sitemap {
+        200 => {
+            text = format!("{text}🗺 Наличие sitemap.xml: есть\n\n")
+        }
+        _ => {
+            text = format!("{text}🗺 Наличие sitemap.xml: нет (код ответа: {})\n\n", site_information.has_sitemap);
+        }
+    }
+
+    match site_information.certificate {
+        Some(cert) => {
+            text = format!("{text}📄 Сертификат:\
+                \nОбщее название: {}\
+                \nОрганизация: {}\
+                \nСтрана: {}\
+                \nИздатель: {}\
+                \nВремя окончания: {}\n\n", cert.intermediate.common_name,
+                           cert.intermediate.organization,
+                           cert.intermediate.country,
+                           cert.intermediate.issuer,
+                           cert.intermediate.time_to_expiration);
+        }
+        None => {
+            text = format!("{text}📄 Сертификат: не найден\n\n")
+        }
+    }
+
+    text
 }
 
 async fn cancel_receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
