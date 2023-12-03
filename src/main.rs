@@ -20,12 +20,12 @@ mod database;
 mod website;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
-type MyDialogue = Dialogue<State, InMemStorage<State>>;
+type MyDialogue = Dialogue<BotState, InMemStorage<BotState>>;
 
 const SECONDS: u64 = 3600;
 
-const STICKER_WELCOME: &str = "CAACAgIAAxkBAAEne6RlSyQM7sJfMXWBN3u-dfEgIlxzoAACBQADwDZPE_lqX5qCa011MwQ";
-const STICKER_ERROR: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwACEAADwDZPE-qBiinxHwLoMwQ";
+const STICKER_WELCOME_ID: &str = "CAACAgIAAxkBAAEne6RlSyQM7sJfMXWBN3u-dfEgIlxzoAACBQADwDZPE_lqX5qCa011MwQ";
+const STICKER_ERROR_ID: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwACEAADwDZPE-qBiinxHwLoMwQ";
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Поддерживаются следующие команды:")]
@@ -41,8 +41,9 @@ enum Command {
     Help
 }
 
+/// Represents the state of a bot.
 #[derive(Clone, Default)]
-enum State {
+enum BotState {
     #[default]
     Default,
 
@@ -63,7 +64,7 @@ async fn main() -> HandlerResult {
     launch_checkers(bot.clone());
 
     Dispatcher::builder(bot, schema())
-        .dependencies(deps![InMemStorage::<State>::new()])
+        .dependencies(deps![InMemStorage::<BotState>::new()])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
@@ -140,36 +141,65 @@ async fn handle_status_code(bot: &Bot, user_id: u64, link: String, status_code: 
         }
     }
 
-    bot.send_sticker(UserId(user_id), InputFile::file_id(STICKER_ERROR)).await?;
+    bot.send_sticker(UserId(user_id), InputFile::file_id(STICKER_ERROR_ID)).await?;
     bot.send_message(UserId(user_id), text).await?;
 
     Ok(())
 }
 
+/// This function returns a teloxide Update handler which performs various
+/// actions based on the command input and the specific state of a Telegram Bot.
+///
+/// Inside the function, three kinds of handlers are defined:
+///
+/// - `command_handler`: This handler manages various commands sent by the user.
+/// - `message_handler`: This handler manages regular messages from the user.
+/// - `callback_query_handlers`: This handler manages callback queries generated when users interact with the bot's InlineKeyboardButtons.
+///
+/// For each handler, several states to which the bot can be transitioned are defined
+/// along with an endpoint function that is called when the bot transition to that state.
+///
+/// # Return
+/// Handler for processing updates and routing them according to the state and command.
+///
+/// Returns an `UpdateHandler` that is used for processing `teloxide::Update`, which
+/// represents updates (`Update`) that Bot API gives your bot.
+///
+/// # Examples
+/// It could be added to dispatcher like this:
+///
+/// ```
+/// Dispatcher::new(bot)
+///     .messages_handler(schema())
+///     .dispatch()
+///     .await;
+/// ```
+///
+/// where `Dispatcher` and `bot` are previously defined according to your program needs.
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     let command_handler = teloxide::filter_command::<Command, _>()
-        .branch(case![State::Default]
+        .branch(case![BotState::Default]
             .branch(case![Command::Start].endpoint(start))
             .branch(case![Command::Menu].endpoint(show_actions))
             .branch(case![Command::Help].endpoint(help)))
-        .branch(case![State::ReceiveLink]
+        .branch(case![BotState::ReceiveLink]
             .branch(case![Command::Cancel].endpoint(cancel_receive_link)))
-        .branch(case![State::DeletingSomeLinks]
+        .branch(case![BotState::DeletingSomeLinks]
             .branch(case![Command::Cancel].endpoint(cancel_deleting_some_links)))
-        .branch(case![State::ReceiveLinkForChecking]
+        .branch(case![BotState::ReceiveLinkForChecking]
             .branch(case![Command::Cancel].endpoint(cancel_receive_link)));
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
-        .branch(case![State::ReceiveLink].endpoint(receive_link))
-        .branch(case![State::DeletingSomeLinks].endpoint(delete_some_links))
-        .branch(case![State::ReceiveLinkForChecking].endpoint(check_site));
+        .branch(case![BotState::ReceiveLink].endpoint(receive_link))
+        .branch(case![BotState::DeletingSomeLinks].endpoint(delete_some_links))
+        .branch(case![BotState::ReceiveLinkForChecking].endpoint(check_site));
 
     let callback_query_handler = Update::filter_callback_query()
-        .branch(case![State::Default].endpoint(menu_choice_callback_handler))
-        .branch(case![State::ReceiveConfirmRemoveLinks].endpoint(menu_confirm_remove_links_callback_handler));
+        .branch(case![BotState::Default].endpoint(menu_choice_callback_handler))
+        .branch(case![BotState::ReceiveConfirmRemoveLinks].endpoint(menu_confirm_remove_links_callback_handler));
 
-    dialogue::enter::<Update, InMemStorage<State>, State, _>()
+    dialogue::enter::<Update, InMemStorage<BotState>, BotState, _>()
         .branch(message_handler)
         .branch(callback_query_handler)
 }
@@ -185,10 +215,12 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 async fn start(bot: Bot, msg: Message) -> HandlerResult {
     info!("A new user has joined the bot: {}", msg.from().expect("Unable to determine user ID").id);
 
-    let text = format!("🚀 Привет, {}! Я - {}, и я могу проанализировать Ваш сайт, то есть проверить скорость его загрузки и ежечасно приводить отчёт о сбоях в работе указанного Вами сайта.", msg.from().expect("Unable to define a user name").first_name, bot.get_me().await?.first_name);
+    let mut text = format!("🚀 Привет, {}! Я - {}, и я могу проанализировать Ваш сайт, то есть проверить скорость его загрузки и ежечасно приводить отчёт о сбоях в работе указанного Вами сайта.", msg.from().expect("Unable to define a user name").first_name, bot.get_me().await?.first_name);
+    text = format!("{text}\n\nОсновной функционал:\n🔭 Анализ сайта (проверка наличия SSL-сертификата, время ответа, наличие robots.txt и sitemap.xml)\n📟 Ежечасная проверка сайта на стабильность");
+
     let keyboard = create_beginning_menu_keyboard().await;
 
-    bot.send_sticker(msg.chat.id, InputFile::file_id(STICKER_WELCOME)).await?;
+    bot.send_sticker(msg.chat.id, InputFile::file_id(STICKER_WELCOME_ID)).await?;
     bot.send_message(msg.chat.id, text).reply_markup(keyboard).await?;
 
     Ok(())
@@ -248,7 +280,7 @@ async fn menu_confirm_remove_links_callback_handler(bot: Bot, dialogue: MyDialog
                 "confirm" => clear_links(bot, dialogue, q).await?,
                 "cancel" => {
                     bot.edit_message_text(message.chat.id, q.message.unwrap().id, "Процесс очистки ссылок отменен.").await?;
-                    dialogue.update(State::Default).await?;
+                    dialogue.update(BotState::Default).await?;
                 },
 
                 _ => (),
@@ -295,7 +327,7 @@ async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery)
 
     bot.send_message(q.chat_id().unwrap(), text).reply_markup(keyboard).await?;
 
-    dialogue.update(State::ReceiveConfirmRemoveLinks).await?;
+    dialogue.update(BotState::ReceiveConfirmRemoveLinks).await?;
 
     Ok(())
 }
@@ -310,7 +342,7 @@ async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery)
 /// * `msg`: Message sent by the user
 async fn start_enter_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Пожалуйста, введите ссылку. Для отмены ввода ссылки введите команду /cancel").await?;
-    dialogue.update(State::ReceiveLink).await?;
+    dialogue.update(BotState::ReceiveLink).await?;
 
     Ok(())
 }
@@ -325,7 +357,7 @@ async fn start_enter_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
 /// * `msg`: Message sent by the user
 async fn start_check_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Пожалуйста, введите ссылку. Для отмены ввода ссылки введите команду /cancel").await?;
-    dialogue.update(State::ReceiveLinkForChecking).await?;
+    dialogue.update(BotState::ReceiveLinkForChecking).await?;
 
     Ok(())
 }
@@ -370,7 +402,7 @@ async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRe
         }
     }
 
-    if !website::has_http_s(&url) {
+    if !website::has_http_or_https(&url) {
         url = format!("https://{}", url);
     }
 
@@ -387,7 +419,7 @@ async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRe
 
         bot.send_message(msg.chat.id, "Спасибо за ссылку! Теперь я буду проверять эту ссылку каждый час").await?;
 
-        dialogue.update(State::Default).await?;
+        dialogue.update(BotState::Default).await?;
     }
     else {
         bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
@@ -416,7 +448,7 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
         }
     }
 
-    if !website::has_http_s(&url) {
+    if !website::has_http_or_https(&url) {
         url = format!("https://{}", url);
     }
 
@@ -469,7 +501,7 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
 
         bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
 
-        dialogue.update(State::Default).await?;
+        dialogue.update(BotState::Default).await?;
     }
     else {
         bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
@@ -481,15 +513,22 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
 async fn cancel_receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Вы отменили ввод ссылки").await?;
 
-    dialogue.update(State::Default).await?;
+    dialogue.update(BotState::Default).await?;
 
     Ok(())
 }
 
+/// Cancels the process of deleting some links.
+///
+/// # Arguments
+///
+/// * `bot` - The `Bot` instance to send a message.
+/// * `dialogue` - The `MyDialogue` instance to update the state.
+/// * `msg` - The `Message` object that triggered the cancellation.
 async fn cancel_deleting_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Вы отменили удаление ссылок").await?;
 
-    dialogue.update(State::Default).await?;
+    dialogue.update(BotState::Default).await?;
 
     Ok(())
 }
@@ -580,7 +619,7 @@ async fn start_deleting_some_links(bot: Bot, dialogue: MyDialogue, q: CallbackQu
         let str = create_links_list("Выберите, какие элементы требуется удалить. Напишите номера элемента через пробел. Вы можете отменить удаление, введя команду /cancel.\n\nИстория запросов:\n", histories);
 
         bot.send_message(user_id, str).await?;
-        dialogue.update(State::DeletingSomeLinks).await?;
+        dialogue.update(BotState::DeletingSomeLinks).await?;
     }
 
     Ok(())
@@ -664,7 +703,7 @@ async fn delete_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
     database::delete_some_links(user_id, links);
 
     bot.send_message(msg.chat.id, "Выбранные вами элементы были удалены").await?;
-    dialogue.update(State::Default).await?;
+    dialogue.update(BotState::Default).await?;
 
     Ok(())
 }
@@ -685,7 +724,7 @@ async fn clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> Handle
 
     bot.edit_message_text(user_id, q.message.unwrap().id, "Ваша история запросов успешно очищена!").await?;
 
-    dialogue.update(State::Default).await?;
+    dialogue.update(BotState::Default).await?;
 
     Ok(())
 }

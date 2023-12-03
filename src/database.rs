@@ -1,6 +1,7 @@
 use std::env;
 use sqlite3::State;
 
+/// Represents a link associated with a user.
 pub struct Links {
     pub user_id: f64,
     pub link: String,

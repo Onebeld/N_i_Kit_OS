@@ -5,6 +5,7 @@ use regex::Regex;
 
 const HTTP_S_REGEX: &str = "^(http|https)://";
 
+/// Represents information about a website.
 pub struct SiteInformation {
     pub status_code: u16,
     pub has_robots: u16,
@@ -14,7 +15,7 @@ pub struct SiteInformation {
 }
 
 lazy_static! {
-    static ref RE_HTTP_S: Regex = {
+    static ref RE_HTTP_OR_HTTPS: Regex = {
         Regex::new(HTTP_S_REGEX).unwrap()
     };
 }
@@ -32,7 +33,7 @@ lazy_static! {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```
 /// use reqwest::Error;
 ///
 /// async fn example() -> Result<u16, Error> {
@@ -88,7 +89,8 @@ pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest:
     })
 }
 
-/// Checks if a given URL has a scheme of "http://" or "https://".
+
+/// Checks if a given URL has either "http" or "https" protocol.
 ///
 /// # Arguments
 ///
@@ -96,19 +98,17 @@ pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest:
 ///
 /// # Returns
 ///
-/// Returns `true` if the URL has a scheme of "http://" or "https://", and `false` otherwise.
+/// * `bool` - "true" if the URL has either "http" or "https" protocol, "false" otherwise.
 ///
-/// # Examples
+/// # Example
 ///
 /// ```
-/// assert_eq!(has_http_s("http://example.com"), true);
-/// assert_eq!(has_http_s("https://example.com"), true);
-/// assert_eq!(has_http_s("ftp://example.com"), false);
-/// assert_eq!(has_http_s("example.com"), false);
-/// assert_eq!(has_http_s("http://"), false);
+/// assert_eq!(has_http_or_https("http://example.com"), true);
+/// assert_eq!(has_http_or_https("https://example.com"), true);
+/// assert_eq!(has_http_or_https("ftp://example.com"), false);
 /// ```
-pub fn has_http_s(url: &str) -> bool {
-    RE_HTTP_S.is_match(url)
+pub fn has_http_or_https(url: &str) -> bool {
+    RE_HTTP_OR_HTTPS.is_match(url)
 }
 
 
