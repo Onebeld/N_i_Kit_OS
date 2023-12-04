@@ -3,7 +3,7 @@ use http::{Uri};
 use lazy_static::lazy_static;
 use regex::Regex;
 
-const HTTP_S_REGEX: &str = "^(http|https)://";
+const HTTP_OR_HTTPS_REGEX: &str = "^(http|https)://";
 
 /// Represents information about a website.
 pub struct SiteInformation {
@@ -16,7 +16,7 @@ pub struct SiteInformation {
 
 lazy_static! {
     static ref RE_HTTP_OR_HTTPS: Regex = {
-        Regex::new(HTTP_S_REGEX).unwrap()
+        Regex::new(HTTP_OR_HTTPS_REGEX).unwrap()
     };
 }
 

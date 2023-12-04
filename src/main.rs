@@ -28,6 +28,8 @@ const SECONDS: u64 = 3600;
 const STICKER_WELCOME_ID: &str = "CAACAgIAAxkBAAEne6RlSyQM7sJfMXWBN3u-dfEgIlxzoAACBQADwDZPE_lqX5qCa011MwQ";
 const STICKER_ERROR_ID: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwACEAADwDZPE-qBiinxHwLoMwQ";
 
+
+/// Represents commands for the bot
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Поддерживаются следующие команды:")]
 enum Command {
@@ -250,7 +252,7 @@ async fn help(bot: Bot, msg: Message) -> HandlerResult {
 
 /// Adds a link to the database if it is a valid URL.
 ///
-/// Arguments:
+/// # Arguments:
 /// - `bot`: The Telegram bot instance.
 /// - `msg`: The received message.
 /// - `link`: The link to be added.
@@ -338,14 +340,32 @@ async fn check_site_command(bot: Bot, msg: Message, link: String) -> HandlerResu
     Ok(())
 }
 
-/// Event handler after a user clicks a button in the default state, which activates a bot action
-/// depending on the selection
+/// Handles the callback for menu choice.
 ///
 /// # Arguments
 ///
-/// * `bot`: Bot instance
-/// * `dialogue`: A handle for controlling dialogue state
-/// * `q`: Response from the user after pressing the button
+/// * `bot` - The bot instance.
+/// * `dialogue` - The dialogue instance.
+/// * `q` - The callback query.
+///
+/// # Returns
+///
+/// A `HandlerResult` indicating the success of the operation.
+///
+/// # Examples
+///
+/// ```rust
+/// use tokio::sync::mpsc;
+///
+/// #[tokio::main]
+/// async fn main() {
+///     let bot = Bot::new();
+///     let dialogue = MyDialogue::new();
+///     let q = CallbackQuery::new();
+///
+///     let result = menu_choice_callback_handler(bot, dialogue, q).await;
+/// }
+/// ```
 async fn menu_choice_callback_handler(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
     if let Some(data) = &q.data {
         if let Some(message) = q.clone().message {
@@ -642,6 +662,35 @@ fn compile_site_information(site_information: SiteInformation) -> String {
     text
 }
 
+
+/// Function to cancel receiving a link in a Telegram chat.
+///
+/// # Arguments
+///
+/// * `bot` - An instance of the `Bot` struct providing methods to interact with the Telegram Bot API.
+/// * `dialogue` - An instance of the `MyDialogue` struct representing the conversation state.
+/// * `msg` - The `Message` struct representing the incoming message in the chat.
+///
+/// # Returns
+///
+/// An `HandlerResult` which is an alias for `Result<(), Error>` indicating the success or failure of the operation.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use your_crate::{Bot, MyDialogue, Message, HandlerResult};
+/// use tokio::runtime::Runtime;
+///
+/// let bot = Bot::new("your_bot_token");
+/// let dialogue = MyDialogue::create();
+/// let msg = Message::new("your_chat_id", "your_message");
+///
+/// let mut rt = Runtime::new().unwrap();
+///
+/// let result = rt.block_on(cancel_receive_link(bot, dialogue, msg));
+///
+/// assert!(result.is_ok());
+/// ```
 async fn cancel_receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Вы отменили ввод ссылки").await?;
 
@@ -666,7 +715,27 @@ async fn cancel_deleting_some_links(bot: Bot, dialogue: MyDialogue, msg: Message
 }
 
 // Creating bot menus
-/// Creates a menu with a single button to start working with the bot
+
+/// Creates the beginning menu keyboard.
+///
+/// This async function creates an instance of `InlineKeyboardMarkup` that represents
+/// a menu keyboard with a single button labeled "Приступим!" and a callback value of "begin".
+///
+/// # Example
+/// ```rust
+/// use telegram_bot::InlineKeyboardMarkup;
+/// use telegram_bot::InlineKeyboardButton;
+///
+/// async fn create_beginning_menu_keyboard() -> InlineKeyboardMarkup {
+///     let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
+///
+///     let begin = InlineKeyboardButton::callback("Приступим!", "begin");
+///
+///     keyboard.push(vec![begin]);
+///
+///     InlineKeyboardMarkup::new(keyboard)
+/// }
+/// ```
 async fn create_beginning_menu_keyboard() -> InlineKeyboardMarkup {
     let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
 
@@ -677,7 +746,11 @@ async fn create_beginning_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(keyboard)
 }
 
-/// Creates a bot action menu
+/// Creates the main menu keyboard with inline buttons.
+///
+/// # Returns
+///
+/// Returns an `InlineKeyboardMarkup` object representing the main menu keyboard.
 async fn create_main_menu_keyboard() -> InlineKeyboardMarkup {
     let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
 
@@ -696,7 +769,13 @@ async fn create_main_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(keyboard)
 }
 
-/// Creates a menu where you must confirm the action of clearing all history
+/// Creates an inline keyboard markup for a confirmation menu.
+///
+/// The resulting inline keyboard will have two buttons: "Очистить" (clear) and "Отмена" (cancel).
+///
+/// # Returns
+///
+/// The resulting inline keyboard markup.
 async fn create_confirmation_menu_keyboard() -> InlineKeyboardMarkup {
     let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
 
@@ -733,13 +812,39 @@ async fn get_all_links_from_user(bot: Bot, q: CallbackQuery) -> HandlerResult {
     Ok(())
 }
 
+/// Starts the process of deleting some links.
 ///
+/// This function takes a `Bot`, `MyDialogue`, and `CallbackQuery` as inputs.
+/// It gets the `user_id` from the `CallbackQuery` and calls the function `get_all_links_from_user` from the `database` module
+/// to retrieve all the links associated with the user.
+///
+/// If there are no links for the user, it sends a message to the user.
+/// Otherwise, it creates a string by calling the `create_links_list` function (passing a text
+/// message and the `histories` parameter) and sends it as a message to the user.
+///
+/// Finally, it updates the `dialogue` with the `BotState::DeletingSomeLinks`.
 ///
 /// # Arguments
 ///
-/// * `bot`: Bot instance
-/// * `dialogue`: A handle for controlling dialogue state
-/// * `q`: Response from the user after pressing the button
+/// * `bot` - The Bot instance.
+/// * `dialogue` - The MyDialogue instance.
+/// * `q` - The CallbackQuery instance.
+///
+/// # Returns
+///
+/// The HandlerResult.
+///
+/// # Examples
+///
+/// ```rust
+/// use crate::{Bot, MyDialogue, CallbackQuery};
+///
+/// let bot = Bot::new();
+/// let dialogue = MyDialogue::new();
+/// let q = CallbackQuery::new();
+///
+/// start_deleting_some_links(bot, dialogue, q).await;
+/// ```
 async fn start_deleting_some_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
     let user_id = q.from.id;
     let histories = database::get_all_links_from_user(user_id.0, None);
