@@ -1,5 +1,5 @@
 use std::env;
-use sqlite3::State;
+use sqlite3::{State, Statement};
 
 /// Represents a link associated with a user.
 pub struct Links {
@@ -7,12 +7,20 @@ pub struct Links {
     pub link: String,
 }
 
-/// Adds a new story to the database
+/// Adds a new link to the database for a given user.
 ///
 /// # Arguments
 ///
-/// * 'user_id' - Telegram user ID
-/// * 'link' - Link to the site
+/// * `user_id` - The ID of the user.
+/// * `link` - The link to be added.
+///
+/// # Returns
+///
+/// The state of the database after adding the link.
+///
+/// # Panics
+///
+/// This function panics if the `DATABASE_URL` environment variable is not set or if there is a failure connecting to the database.
 pub fn add_link(user_id: u64, link: &str) -> State {
     // Adding a new row to the database
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
@@ -28,24 +36,41 @@ pub fn add_link(user_id: u64, link: &str) -> State {
     db.next().unwrap()
 }
 
-/// Checks if a link exists that has the same reference
+/// Checks if a link exists for a given user.
 ///
 /// # Arguments
 ///
-/// * 'user_id' - Telegram user ID
-/// * 'link' - Link to the site
+/// * `user_id` - The ID of the user.
+/// * `link` - The link to check.
+///
+/// # Returns
+///
+/// Returns `true` if the link exists for the user, `false` otherwise.
 pub fn is_link_exists(user_id: u64, link: &str) -> bool {
     // We get the link list and check if there are any items in it
     let vec: Vec<Links> = get_all_links_from_user(user_id, Option::from(link));
     return vec.iter().count() > 0
 }
 
-/// Retrieves histories of recent user requests
+/// Returns a vector of links for a given user ID and optional link.
+///
+/// If the `link` parameter is `Some`, the function will return all links
+/// for the specified user ID that match the given link. If `link` is `None`,
+/// it will return all links for the specified user ID.
 ///
 /// # Arguments
 ///
-/// * 'user_id' - Telegram user ID
-/// * 'link' - Link to the site if you need to prevent duplicate links
+/// * `user_id` - The ID of the user.
+/// * `link` - An optional link to filter the results.
+///
+/// # Returns
+///
+/// A vector containing the links that match the specified user ID and link.
+///
+/// # Panics
+///
+/// This function will panic if the `DATABASE_URL` environment variable is not set
+/// or if there is a problem connecting to the database.
 pub fn get_all_links_from_user(user_id: u64, link: Option<&str>) -> Vec<Links> {
     let query: &str;
 
@@ -72,12 +97,7 @@ pub fn get_all_links_from_user(user_id: u64, link: Option<&str>) -> Vec<Links> {
     let mut vec: Vec<Links> = Vec::new();
 
     // Get the rows and add a new link to the list
-    while let State::Row = db.next().unwrap() {
-        vec.push(Links {
-            user_id: db.read::<f64>(0).unwrap(),
-            link: db.read::<String>(1).unwrap(),
-        })
-    }
+    add_to_vec_from_database(db, &mut vec);
 
     vec
 }
@@ -102,21 +122,57 @@ pub fn get_all_links() -> Vec<Links> {
 
     let mut vec: Vec<Links> = Vec::new();
 
+    add_to_vec_from_database(db, &mut vec);
+
+    vec
+}
+
+/// Adds data from a database statement to a vector of Links.
+///
+/// # Arguments
+///
+/// * `db` - The database statement to retrieve data from.
+/// * `vec` - The vector of Links to add the data to.
+///
+/// # Example
+///
+/// ```
+/// use std::vec::Vec;
+///
+/// struct Links {
+///     user_id: f64,
+///     link: String,
+/// }
+///
+/// let mut db: Statement = ...; // database statement
+/// let mut links_vec: Vec<Links> = Vec::new();
+///
+/// // Add data from the database statement to the vector
+/// add_to_vec_from_database(db, &mut links_vec);
+/// ```
+fn add_to_vec_from_database(mut db: Statement, vec: &mut Vec<Links>) {
     while let State::Row = db.next().unwrap() {
         vec.push(Links {
             user_id: db.read::<f64>(0).unwrap(),
             link: db.read::<String>(1).unwrap(),
         })
     }
-
-    vec
 }
 
-/// Clears the user's recent request link
+/// Clears all links associated with a user.
 ///
 /// # Arguments
 ///
-/// * 'user_id' - Telegram user ID
+/// * `user_id` - The ID of the user whose links should be cleared.
+///
+/// # Returns
+///
+/// The state after clearing the links.
+///
+/// # Panics
+///
+/// This function will panic if the `DATABASE_URL` environment variable is not set
+/// or if there is a problem connecting to the database.
 pub fn clear_all_links(user_id: u64) -> State {
     // Specify in the request that we want to delete all histories in which the user ID matches the required one
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");

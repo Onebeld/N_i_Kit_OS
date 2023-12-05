@@ -89,7 +89,6 @@ pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest:
     })
 }
 
-
 /// Checks if a given URL has either "http" or "https" protocol.
 ///
 /// # Arguments
@@ -110,7 +109,6 @@ pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest:
 pub fn has_http_or_https(url: &str) -> bool {
     RE_HTTP_OR_HTTPS.is_match(url)
 }
-
 
 #[cfg(test)]
 mod website_checker_tests {

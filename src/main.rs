@@ -28,7 +28,6 @@ const SECONDS: u64 = 3600;
 const STICKER_WELCOME_ID: &str = "CAACAgIAAxkBAAEne6RlSyQM7sJfMXWBN3u-dfEgIlxzoAACBQADwDZPE_lqX5qCa011MwQ";
 const STICKER_ERROR_ID: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwACEAADwDZPE-qBiinxHwLoMwQ";
 
-
 /// Represents commands for the bot
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Поддерживаются следующие команды:")]
@@ -453,7 +452,6 @@ async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery)
     Ok(())
 }
 
-
 /// Sends a message to the user telling them to enter a link and also goes to the ReceiveLink state
 ///
 /// # Arguments
@@ -661,7 +659,6 @@ fn compile_site_information(site_information: SiteInformation) -> String {
 
     text
 }
-
 
 /// Function to cancel receiving a link in a Telegram chat.
 ///
