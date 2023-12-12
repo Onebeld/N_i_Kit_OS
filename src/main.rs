@@ -228,7 +228,7 @@ async fn start(bot: Bot, msg: Message) -> HandlerResult {
     info!("A new user has joined the bot: {}", msg.from().expect("Unable to determine user ID").id);
 
     let mut text = format!("🚀 Привет, {}! Я - {}, и я могу проанализировать Ваш сайт, то есть проверить скорость его загрузки и ежечасно приводить отчёт о сбоях в работе указанного Вами сайта.", msg.from().expect("Unable to define a user name").first_name, bot.get_me().await?.first_name);
-    text = format!("{text}\n\nОсновной функционал:\n🔭 Анализ сайта (проверка наличия SSL-сертификата, время ответа, наличие robots.txt и sitemap.xml)\n📟 Ежечасная проверка сайта на стабильность");
+    text = format!("{text}\n\nОсновной функционал:\n🔭 Анализ сайта (проверка наличия SSL-сертификата, время ответа, наличие robots.txt и sitemap.xml)\n📟 Ежечасная проверка сайта на стабильность, добавив ссылки в базу данных");
 
     let keyboard = create_beginning_menu_keyboard().await;
 
@@ -322,15 +322,26 @@ async fn check_site_command(bot: Bot, msg: Message, link: String) -> HandlerResu
     }
 
     if is_url(&url) {
-        let sent_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...").await?;
+        let sent_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...\nМаксимальное время ответа - 15 секунд").await?;
 
         info!("Site information for the user is requested: {}", msg.from().expect("Unable to determine user ID").id.0);
 
-        let site_information = website::get_site_information(&url).await?;
+        let site_information = website::get_site_information(&url).await;
 
-        let text = compile_site_information(site_information);
-
-        bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
+        match site_information {
+            Ok(result) => {
+                let text = compile_site_information(result);
+                bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
+            }
+            Err(e) => {
+                if e.is_timeout() {
+                    bot.edit_message_text(msg.chat.id, sent_message.id, "Сайт слишком долго отвечал").await?;
+                }
+                else {
+                    bot.edit_message_text(msg.chat.id, sent_message.id, "Боту не удалось проверить сайт").await?;
+                }
+            }
+        }
     }
     else {
         bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
@@ -572,15 +583,26 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
     }
 
     if is_url(&url) {
-        let sent_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...").await?;
+        let sent_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...\nМаксимальное время ответа - 15 секунд").await?;
 
         info!("Site information for the user is requested: {}", msg.from().expect("Unable to determine user ID").id.0);
 
-        let site_information = website::get_site_information(&url).await?;
+        let site_information = website::get_site_information(&url).await;
 
-        let text = compile_site_information(site_information);
-
-        bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
+        match site_information {
+            Ok(result) => {
+                let text = compile_site_information(result);
+                bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
+            }
+            Err(e) => {
+                if e.is_timeout() {
+                    bot.edit_message_text(msg.chat.id, sent_message.id, "Сайт слишком долго отвечал").await?;
+                }
+                else {
+                    bot.edit_message_text(msg.chat.id, sent_message.id, "Боту не удалось проверить сайт").await?;
+                }
+            }
+        }
 
         dialogue.update(BotState::Default).await?;
     }

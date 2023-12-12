@@ -1,7 +1,9 @@
+use std::time::Duration;
 use checkssl::{Cert, CheckSSL};
 use http::{Uri};
 use lazy_static::lazy_static;
 use regex::Regex;
+use reqwest::Client;
 
 const HTTP_OR_HTTPS_REGEX: &str = "^(http|https)://";
 
@@ -44,7 +46,9 @@ lazy_static! {
 /// }
 /// ```
 pub async fn get_request_code(url: &str) -> Result<u16, reqwest::Error> {
-    let resp = reqwest::get(url).await?;
+    let client = Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+
+    let resp = client.get(url).send().await?;
     let status_code = resp.status().as_u16();
 
     Ok(status_code)
@@ -68,10 +72,10 @@ pub async fn get_request_code(url: &str) -> Result<u16, reqwest::Error> {
 ///
 /// A `Result` containing a `SiteInformation` struct on success, or a `reqwest::Error` on failure.
 pub async fn get_site_information(url: &str) -> Result<SiteInformation, reqwest::Error> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
 
     let time_now = std::time::Instant::now();
-    let resp_site = reqwest::get(url).await?;
+    let resp_site = client.get(url).send().await?;
     let elapsed_time = time_now.elapsed();
 
     let uri = url.parse::<Uri>().unwrap();
