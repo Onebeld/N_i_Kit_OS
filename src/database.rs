@@ -118,7 +118,7 @@ pub fn get_all_links() -> Vec<Links> {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL is not set");
     let connection = sqlite3::open(database_url).expect("Failed to connect to the database");
 
-    let mut db = connection.prepare(query).unwrap();
+    let db = connection.prepare(query).unwrap();
 
     let mut vec: Vec<Links> = Vec::new();
 

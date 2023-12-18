@@ -1,6 +1,6 @@
 [package]
-name = "n_i_kit_os"
-version = "0.3.0"
+name = "sparkle_scanner"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]

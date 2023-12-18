@@ -11,6 +11,7 @@ use teloxide::{
     types::{InputFile}
 };
 use teloxide::dispatching::dialogue::GetChatId;
+
 use crate::database::Links;
 use crate::website::SiteInformation;
 
@@ -21,9 +22,9 @@ mod database;
 mod website;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
-type MyDialogue = Dialogue<BotState, InMemStorage<BotState>>;
+type SparkleDialogue = Dialogue<BotState, InMemStorage<BotState>>;
 
-const SECONDS: u64 = 3600;
+const HOUR_IN_SECONDS: u64 = 3600;
 
 const STICKER_WELCOME_ID: &str = "CAACAgIAAxkBAAEne6RlSyQM7sJfMXWBN3u-dfEgIlxzoAACBQADwDZPE_lqX5qCa011MwQ";
 const STICKER_ERROR_ID: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwACEAADwDZPE-qBiinxHwLoMwQ";
@@ -31,23 +32,23 @@ const STICKER_ERROR_ID: &str = "CAACAgIAAxkBAAEne6JlSyP9VdH3N8Mk2imfp7BgFRu9NwAC
 /// Represents commands for the bot
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Поддерживаются следующие команды:")]
-enum Command {
-    #[command(description = "Запускает процедуру.")]
+enum SparkleCommand {
+    #[command(description = "Запускает процедуру")]
     Start,
-    #[command(description = "Показать меню действий бота.")]
+    #[command(description = "Показать меню действий бота")]
     Menu,
-    #[command(description = "Отменяет ввод данных в бот.")]
+    #[command(description = "Отменяет ввод данных в бот")]
     Cancel,
-    #[command(description = "Добавление ссылки в базу данных для ежечастной проверки сайта на доступность.")]
+    #[command(description = "Добавляет ссылки в базу данных для ежечасной проверки сайта на доступность")]
     AddLink {
         link: String
     },
-    #[command(description = "Проанализировать сайт.")]
+    #[command(description = "Анализирует сайт")]
     CheckSite {
         link: String
     },
 
-    #[command(description = "Показать команды.")]
+    #[command(description = "Показывает команды бота")]
     Help
 }
 
@@ -90,7 +91,7 @@ async fn main() -> HandlerResult {
 ///
 /// * `bot`: Bot instance
 fn launch_checkers(bot: Bot) {
-    let mut interval = tokio::time::interval(Duration::from_secs(SECONDS));
+    let mut interval = tokio::time::interval(Duration::from_secs(HOUR_IN_SECONDS));
 
     info!("A thread has been launched to test sites.");
 
@@ -187,19 +188,19 @@ async fn handle_status_code(bot: &Bot, user_id: u64, link: String, status_code: 
 ///
 /// where `Dispatcher` and `bot` are previously defined according to your program needs.
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let command_handler = teloxide::filter_command::<Command, _>()
+    let command_handler = teloxide::filter_command::<SparkleCommand, _>()
         .branch(case![BotState::Default]
-            .branch(case![Command::Start].endpoint(start))
-            .branch(case![Command::Menu].endpoint(show_actions))
-            .branch(case![Command::Help].endpoint(help))
-            .branch(case![Command::AddLink { link }].endpoint(add_link))
-            .branch(case![Command::CheckSite { link }].endpoint(check_site_command)))
+            .branch(case![SparkleCommand::Start].endpoint(start))
+            .branch(case![SparkleCommand::Menu].endpoint(show_actions))
+            .branch(case![SparkleCommand::Help].endpoint(help))
+            .branch(case![SparkleCommand::AddLink { link }].endpoint(add_link))
+            .branch(case![SparkleCommand::CheckSite { link }].endpoint(check_site_command)))
         .branch(case![BotState::ReceiveLink]
-            .branch(case![Command::Cancel].endpoint(cancel_receive_link)))
+            .branch(case![SparkleCommand::Cancel].endpoint(cancel_receive_link)))
         .branch(case![BotState::DeletingSomeLinks]
-            .branch(case![Command::Cancel].endpoint(cancel_deleting_some_links)))
+            .branch(case![SparkleCommand::Cancel].endpoint(cancel_deleting_some_links)))
         .branch(case![BotState::ReceiveLinkForChecking]
-            .branch(case![Command::Cancel].endpoint(cancel_receive_link)));
+            .branch(case![SparkleCommand::Cancel].endpoint(cancel_receive_link)));
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
@@ -245,7 +246,7 @@ async fn start(bot: Bot, msg: Message) -> HandlerResult {
 /// * `bot`: Bot instance
 /// * `msg`: Message sent by the user
 async fn help(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+    bot.send_message(msg.chat.id, SparkleCommand::descriptions().to_string()).await?;
     Ok(())
 }
 
@@ -322,7 +323,7 @@ async fn check_site_command(bot: Bot, msg: Message, link: String) -> HandlerResu
     }
 
     if is_url(&url) {
-        let sent_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...\nМаксимальное время ответа - 15 секунд").await?;
+        let send_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...\nМаксимальное время ответа - 15 секунд").await?;
 
         info!("Site information for the user is requested: {}", msg.from().expect("Unable to determine user ID").id.0);
 
@@ -331,14 +332,14 @@ async fn check_site_command(bot: Bot, msg: Message, link: String) -> HandlerResu
         match site_information {
             Ok(result) => {
                 let text = compile_site_information(result);
-                bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
+                bot.edit_message_text(msg.chat.id, send_message.id, text).await?;
             }
             Err(e) => {
                 if e.is_timeout() {
-                    bot.edit_message_text(msg.chat.id, sent_message.id, "Сайт слишком долго отвечал").await?;
+                    bot.edit_message_text(msg.chat.id, send_message.id, "Сайт слишком долго отвечал").await?;
                 }
                 else {
-                    bot.edit_message_text(msg.chat.id, sent_message.id, "Боту не удалось проверить сайт").await?;
+                    bot.edit_message_text(msg.chat.id, send_message.id, "Боту не удалось проверить сайт").await?;
                 }
             }
         }
@@ -376,17 +377,17 @@ async fn check_site_command(bot: Bot, msg: Message, link: String) -> HandlerResu
 ///     let result = menu_choice_callback_handler(bot, dialogue, q).await;
 /// }
 /// ```
-async fn menu_choice_callback_handler(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+async fn menu_choice_callback_handler(bot: Bot, dialogue: SparkleDialogue, q: CallbackQuery) -> HandlerResult {
     if let Some(data) = &q.data {
         if let Some(message) = q.clone().message {
             match data.as_str() {
-                "begin" => show_actions(bot, message).await?,
-                "check_link" => start_check_link(bot, dialogue, message).await?,
+                "begin" => show_actions(bot, message, q).await?,
+                "check_link" => start_check_link(bot, dialogue, message, q).await?,
                 "get_links" => get_all_links_from_user(bot, q).await?,
                 "clear_all_links" => ask_about_clear_links(bot, dialogue, q).await?,
                 "delete_some_links" => start_deleting_some_links(bot, dialogue, q).await?,
 
-                "enter_links" => start_enter_links(bot, dialogue, message).await?,
+                "enter_links" => start_enter_links(bot, dialogue, message, q).await?,
 
                 _ => (),
             }
@@ -404,14 +405,18 @@ async fn menu_choice_callback_handler(bot: Bot, dialogue: MyDialogue, q: Callbac
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `q`: Response from the user after pressing the button
-async fn menu_confirm_remove_links_callback_handler(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+async fn menu_confirm_remove_links_callback_handler(bot: Bot, dialogue: SparkleDialogue, q: CallbackQuery) -> HandlerResult {
     if let Some(data) = &q.data {
         if let Some(message) = &q.message {
             match data.as_str() {
                 "confirm" => clear_links(bot, dialogue, q).await?,
                 "cancel" => {
-                    bot.edit_message_text(message.chat.id, q.message.unwrap().id, "Процесс очистки ссылок отменен.").await?;
+                    bot.edit_message_text(message.chat.id, q.message.clone().unwrap().id, "Процесс очистки ссылок отменен.").await?;
                     dialogue.update(BotState::Default).await?;
+
+                    show_main_menu(&bot, &message).await?;
+
+                    bot.answer_callback_query(q.id).await?;
                 },
 
                 _ => (),
@@ -428,7 +433,20 @@ async fn menu_confirm_remove_links_callback_handler(bot: Bot, dialogue: MyDialog
 ///
 /// * `bot`: Bot instance
 /// * `msg`: Message sent by the user
-async fn show_actions(bot: Bot, msg: Message) -> HandlerResult {
+async fn show_actions(bot: Bot, msg: Message, q: CallbackQuery) -> HandlerResult {
+    show_main_menu(&bot, &msg).await?;
+    bot.answer_callback_query(q.id).await?;
+
+    Ok(())
+}
+
+/// Sends a message to the user that displays the main menu
+///
+/// # Arguments
+///
+/// * `bot`: Bot instance
+/// * `msg`: Message sent by the user
+async fn show_main_menu(bot: &Bot, msg: &Message) -> HandlerResult {
     let text = format!("{} к вашим услугам!\nЧто вы хотите сделать?", bot.get_me().await?.first_name);
     let keyboard = create_main_menu_keyboard().await;
 
@@ -444,7 +462,7 @@ async fn show_actions(bot: Bot, msg: Message) -> HandlerResult {
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `msg`: Message sent by the user
-async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+async fn ask_about_clear_links(bot: Bot, dialogue: SparkleDialogue, q: CallbackQuery) -> HandlerResult {
     let user_id = q.from.id;
     let histories = database::get_all_links_from_user(user_id.0, None);
 
@@ -460,6 +478,8 @@ async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery)
 
     dialogue.update(BotState::ReceiveConfirmRemoveLinks).await?;
 
+    bot.answer_callback_query(q.id).await?;
+
     Ok(())
 }
 
@@ -470,9 +490,11 @@ async fn ask_about_clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery)
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `msg`: Message sent by the user
-async fn start_enter_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn start_enter_links(bot: Bot, dialogue: SparkleDialogue, msg: Message, q: CallbackQuery) -> HandlerResult {
     bot.send_message(msg.chat.id, "Пожалуйста, введите ссылку. Для отмены ввода ссылки введите команду /cancel").await?;
     dialogue.update(BotState::ReceiveLink).await?;
+
+    bot.answer_callback_query(q.id).await?;
 
     Ok(())
 }
@@ -485,9 +507,11 @@ async fn start_enter_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `msg`: Message sent by the user
-async fn start_check_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn start_check_link(bot: Bot, dialogue: SparkleDialogue, msg: Message, q: CallbackQuery) -> HandlerResult {
     bot.send_message(msg.chat.id, "Пожалуйста, введите ссылку. Для отмены ввода ссылки введите команду /cancel").await?;
     dialogue.update(BotState::ReceiveLinkForChecking).await?;
+
+    bot.answer_callback_query(q.id).await?;
 
     Ok(())
 }
@@ -517,7 +541,7 @@ async fn start_check_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> Handl
 ///     Ok(())
 /// }
 /// ```
-async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn receive_link(bot: Bot, dialogue: SparkleDialogue, msg: Message) -> HandlerResult {
     let user_id = msg.from().expect("Unable to determine user ID").id;
 
     let mut url: String;
@@ -550,6 +574,8 @@ async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRe
         bot.send_message(msg.chat.id, "Спасибо за ссылку! Теперь я буду проверять эту ссылку каждый час").await?;
 
         dialogue.update(BotState::Default).await?;
+
+        show_main_menu(&bot, &msg).await?;
     }
     else {
         bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
@@ -565,7 +591,7 @@ async fn receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRe
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `msg`: Message sent by the user
-async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn check_site(bot: Bot, dialogue: SparkleDialogue, msg: Message) -> HandlerResult {
     let mut url: String;
 
     match msg.text() {
@@ -583,7 +609,7 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
     }
 
     if is_url(&url) {
-        let sent_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...\nМаксимальное время ответа - 15 секунд").await?;
+        let send_message = bot.send_message(msg.chat.id, "Пожалуйста, подождите...\nМаксимальное время ответа - 15 секунд").await?;
 
         info!("Site information for the user is requested: {}", msg.from().expect("Unable to determine user ID").id.0);
 
@@ -592,19 +618,21 @@ async fn check_site(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
         match site_information {
             Ok(result) => {
                 let text = compile_site_information(result);
-                bot.edit_message_text(msg.chat.id, sent_message.id, text).await?;
+                bot.edit_message_text(msg.chat.id, send_message.id, text).await?;
             }
             Err(e) => {
                 if e.is_timeout() {
-                    bot.edit_message_text(msg.chat.id, sent_message.id, "Сайт слишком долго отвечал").await?;
+                    bot.edit_message_text(msg.chat.id, send_message.id, "Сайт слишком долго отвечал").await?;
                 }
                 else {
-                    bot.edit_message_text(msg.chat.id, sent_message.id, "Боту не удалось проверить сайт").await?;
+                    bot.edit_message_text(msg.chat.id, send_message.id, "Боту не удалось проверить сайт").await?;
                 }
             }
         }
 
         dialogue.update(BotState::Default).await?;
+
+        show_main_menu(&bot, &msg).await?;
     }
     else {
         bot.send_message(msg.chat.id, "Данный текст не является ссылкой!").await?;
@@ -710,7 +738,7 @@ fn compile_site_information(site_information: SiteInformation) -> String {
 ///
 /// assert!(result.is_ok());
 /// ```
-async fn cancel_receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn cancel_receive_link(bot: Bot, dialogue: SparkleDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Вы отменили ввод ссылки").await?;
 
     dialogue.update(BotState::Default).await?;
@@ -725,7 +753,7 @@ async fn cancel_receive_link(bot: Bot, dialogue: MyDialogue, msg: Message) -> Ha
 /// * `bot` - The `Bot` instance to send a message.
 /// * `dialogue` - The `MyDialogue` instance to update the state.
 /// * `msg` - The `Message` object that triggered the cancellation.
-async fn cancel_deleting_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn cancel_deleting_some_links(bot: Bot, dialogue: SparkleDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Вы отменили удаление ссылок").await?;
 
     dialogue.update(BotState::Default).await?;
@@ -828,6 +856,8 @@ async fn get_all_links_from_user(bot: Bot, q: CallbackQuery) -> HandlerResult {
         bot.send_message(user_id, str).await?;
     }
 
+    bot.answer_callback_query(q.id).await?;
+
     Ok(())
 }
 
@@ -864,7 +894,7 @@ async fn get_all_links_from_user(bot: Bot, q: CallbackQuery) -> HandlerResult {
 ///
 /// start_deleting_some_links(bot, dialogue, q).await;
 /// ```
-async fn start_deleting_some_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+async fn start_deleting_some_links(bot: Bot, dialogue: SparkleDialogue, q: CallbackQuery) -> HandlerResult {
     let user_id = q.from.id;
     let histories = database::get_all_links_from_user(user_id.0, None);
 
@@ -877,6 +907,8 @@ async fn start_deleting_some_links(bot: Bot, dialogue: MyDialogue, q: CallbackQu
         bot.send_message(user_id, str).await?;
         dialogue.update(BotState::DeletingSomeLinks).await?;
     }
+
+    bot.answer_callback_query(q.id).await?;
 
     Ok(())
 }
@@ -907,7 +939,7 @@ fn create_links_list(str: &str, links: Vec<Links>) -> String {
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `msg`: Message sent by the user
-async fn delete_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn delete_some_links(bot: Bot, dialogue: SparkleDialogue, msg: Message) -> HandlerResult {
     let numbers_string: String;
     let user_id = msg.from().expect("Unable to determine user ID").id.0;
 
@@ -961,6 +993,8 @@ async fn delete_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
     bot.send_message(msg.chat.id, "Выбранные вами элементы были удалены").await?;
     dialogue.update(BotState::Default).await?;
 
+    show_main_menu(&bot, &msg).await?;
+
     Ok(())
 }
 
@@ -971,16 +1005,21 @@ async fn delete_some_links(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
 /// * `bot`: Bot instance
 /// * `dialogue`: A handle for controlling dialogue state
 /// * `q`: Response from the user after pressing the button
-async fn clear_links(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+async fn clear_links(bot: Bot, dialogue: SparkleDialogue, q: CallbackQuery) -> HandlerResult {
     let user_id = q.from.id;
+    let msg = q.message.expect("Failed to retrieve message ");
 
     database::clear_all_links(user_id.0);
 
     info!("Completely deleted the user's history: {}", user_id);
 
-    bot.edit_message_text(user_id, q.message.unwrap().id, "Ваша история запросов успешно очищена!").await?;
+    bot.edit_message_text(user_id, msg.id, "Ваша история запросов успешно очищена!").await?;
 
     dialogue.update(BotState::Default).await?;
+
+    show_main_menu(&bot, &msg).await?;
+
+    bot.answer_callback_query(q.id).await?;
 
     Ok(())
 }
